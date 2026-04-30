@@ -21,8 +21,8 @@ import qualified Streamly.Internal.Data.MutByteArray as MBA
 
 #if MIN_VERSION_text(2,0,0)
 
-import qualified Data.Text.Array as TArr (Array(..))
-#define T_ARR_CON TArr.ByteArray
+-- In text >= 2.0, Text constructor is: Text ByteArray# Int Int
+-- The ByteArray# is used directly without a wrapper
 #define LEN_TO_BYTES(l) l
 
 #else
@@ -56,6 +56,15 @@ instance Serialize Strict.Text where
             newArr <- MBA.new lenBytes
             -- XXX We can perform an unrolled word copy directly?
             MBA.putSliceUnsafe arr off1 newArr 0 lenBytes
+#if MIN_VERSION_text(2,0,0)
+            pure
+                ( off1 + lenBytes
+                , Strict.Text
+                      (unsafeCoerce# (MBA.getMutableByteArray# newArr))
+                      0
+                      lenTArr
+                )
+#else
             pure
                 ( off1 + lenBytes
                 , Strict.Text
@@ -64,12 +73,17 @@ instance Serialize Strict.Text where
                       0
                       lenTArr
                 )
+#endif
         else error $ "deserialize: Strict.Text: input buffer underflow: off1 = "
                 ++ show off1 ++ " lenBytes = " ++ show lenBytes
                 ++ " end = " ++ show end
 
     {-# INLINE serializeAt #-}
+#if MIN_VERSION_text(2,0,0)
+    serializeAt off arr (Strict.Text barr# offTArr lenTArr) = do
+#else
     serializeAt off arr (Strict.Text (T_ARR_CON barr#) offTArr lenTArr) = do
+#endif
         off1 <- serializeAt off arr (fromIntegral lenTArr :: Int64)
         let lenBytes = LEN_TO_BYTES(lenTArr)
         MBA.putSliceUnsafe
