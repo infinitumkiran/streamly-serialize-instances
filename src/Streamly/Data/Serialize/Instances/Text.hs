@@ -21,8 +21,14 @@ import qualified Streamly.Internal.Data.MutByteArray as MBA
 
 #if MIN_VERSION_text(2,0,0)
 
--- In text >= 2.0, Text constructor is: Text ByteArray# Int Int
--- The ByteArray# is used directly without a wrapper
+-- In text >= 2.0, Data.Text.Array.Array is a type synonym for the BOXED
+-- Data.Array.Byte.ByteArray (data ByteArray = ByteArray ByteArray#). The Text
+-- constructor's first field is that wrapper, NOT a raw ByteArray#, so we must
+-- destructure / reconstruct the ByteArray wrapper (same shape as the < 2.0
+-- path). Treating the field as a bare ByteArray# and unsafeCoerce#-ing the box
+-- copies heap-pointer garbage instead of the UTF-8 bytes.
+import Data.Array.Byte (ByteArray(..))
+#define T_ARR_CON ByteArray
 #define LEN_TO_BYTES(l) l
 
 #else
@@ -56,15 +62,6 @@ instance Serialize Strict.Text where
             newArr <- MBA.new lenBytes
             -- XXX We can perform an unrolled word copy directly?
             MBA.putSliceUnsafe arr off1 newArr 0 lenBytes
-#if MIN_VERSION_text(2,0,0)
-            pure
-                ( off1 + lenBytes
-                , Strict.Text
-                      (unsafeCoerce# (MBA.getMutableByteArray# newArr))
-                      0
-                      lenTArr
-                )
-#else
             pure
                 ( off1 + lenBytes
                 , Strict.Text
@@ -73,17 +70,12 @@ instance Serialize Strict.Text where
                       0
                       lenTArr
                 )
-#endif
         else error $ "deserialize: Strict.Text: input buffer underflow: off1 = "
                 ++ show off1 ++ " lenBytes = " ++ show lenBytes
                 ++ " end = " ++ show end
 
     {-# INLINE serializeAt #-}
-#if MIN_VERSION_text(2,0,0)
-    serializeAt off arr (Strict.Text barr# offTArr lenTArr) = do
-#else
     serializeAt off arr (Strict.Text (T_ARR_CON barr#) offTArr lenTArr) = do
-#endif
         off1 <- serializeAt off arr (fromIntegral lenTArr :: Int64)
         let lenBytes = LEN_TO_BYTES(lenTArr)
         MBA.putSliceUnsafe
